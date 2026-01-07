@@ -1394,7 +1394,8 @@ app.get('/health', (req, res) => {
 // 404/SPA Fallback handler - catches all routes not matched above
 app.use((req, res) => {
   // Never serve HTML for API routes - always return JSON
-  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+  // Allow auth routes to be processed by their specific handlers
+  if (req.path.startsWith('/api/')) {
     return res.status(404).json({ error: 'Not found' });
   }
 
