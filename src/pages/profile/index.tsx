@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useUser, useAdmin, useFetch } from "@/hooks/useUserData";
+import { useSanitize } from "@/hooks/useSanitize";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +22,7 @@ const Profile = () => {
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { user: profileUser, loading: profileLoading } = useUser();
   const { isAdmin } = useAdmin();
+  const { sanitizeStrict } = useSanitize();
   const { data: myRaces = [] } = useFetch<Race[]>('/api/my/races', !!authUser);
   const { data: adminNews = [] } = useFetch<NewsItem[]>('/api/news', isAdmin);
   const { data: adminRaces = [] } = useFetch<RaceData[]>('/api/races', isAdmin);

@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useSanitize } from "@/hooks/useSanitize";
 
 interface NewsCardProps {
   id: string;
@@ -11,6 +12,8 @@ interface NewsCardProps {
 }
 
 const NewsCard = ({ id, category, date, title, description, image }: NewsCardProps) => {
+  const { sanitizeStrict } = useSanitize();
+  
   const categoryColors: Record<string, string> = {
     Regulamento: "bg-destructive/10 text-destructive",
     Parceria: "bg-accent/10 text-accent",
@@ -26,7 +29,7 @@ const NewsCard = ({ id, category, date, title, description, image }: NewsCardPro
         <div className="relative aspect-video overflow-hidden rounded-lg mb-4">
           <img
             src={image}
-            alt={title}
+            alt={sanitizeStrict(title)}
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-110"
           />
         </div>
@@ -34,17 +37,17 @@ const NewsCard = ({ id, category, date, title, description, image }: NewsCardPro
       {/* Header */}
       <div className="mb-4 flex items-center justify-between">
         <span className={`rounded-full px-3 py-1 text-xs font-bold ${categoryColors[category] || categoryColors.Campeonato}`}>
-          {category}
+          {sanitizeStrict(category)}
         </span>
         <span className="text-xs text-muted-foreground">{date}</span>
       </div>
 
       {/* Content */}
       <h3 className="mb-3 font-heading text-lg font-bold text-foreground transition-colors group-hover:text-primary">
-        {title}
+        {sanitizeStrict(title)}
       </h3>
       <p className="mb-4 text-sm text-muted-foreground line-clamp-3">
-        {description}
+        {sanitizeStrict(description)}
       </p>
 
       {/* Link */}

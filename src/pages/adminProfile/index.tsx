@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
+import { useLazyLoad } from '@/hooks/useLazyLoad';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { AlertCircle } from 'lucide-react';
@@ -20,6 +21,8 @@ const AdminProfile: React.FC = () => {
   const navigate = useNavigate();
   const { user: authUser, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
+  const { loadData, isLoading: isLazyLoading, clearCache } = useLazyLoad();
+  
   const [isAdmin, setIsAdmin] = useState(false);
   const [checkingAdmin, setCheckingAdmin] = useState(true);
   const [activeTab, setActiveTab] = useState<string>('overview');
@@ -69,33 +72,28 @@ const AdminProfile: React.FC = () => {
     recentActivity: 0
   });
 
-  const fetchData = useCallback(async (type: string, endpoint: string, setter: React.Dispatch<React.SetStateAction<unknown>>) => {
-    try {
-      setIsLoading(true);
-      const response = await fetch(endpoint);
-      
-      if (!response.ok) {
-        throw new Error(`Failed to fetch ${type}`);
-      }
-      
-      const data = await response.json();
-      setter(data);
-      
-      toast({
-        title: "Success",
-        description: `${type.charAt(0).toUpperCase() + type.slice(1)} data loaded successfully.`,
-      });
-    } catch (error) {
-      console.error(`Error fetching ${type}:`, error);
-      toast({
-        title: "Error",
-        description: `Failed to load ${type} data.`,
-        variant: "destructive",
-      });
-    } finally {
+  // Load data on tab change (lazy loading)
+  useEffect(() => {
+    if (!isAdmin || checkingAdmin || activeTab === 'overview') return;
+
+    const tabConfigs: Record<string, { endpoint: string; setter: React.Dispatch<React.SetStateAction<any>> }> = {
+      users: { endpoint: '/api/accounts', setter: setUsers },
+      achievements: { endpoint: '/api/achievements', setter: setAchievements },
+      races: { endpoint: '/api/races', setter: setRaces },
+      news: { endpoint: '/api/news', setter: setNews },
+      standings: { endpoint: '/api/standings', setter: setStandings },
+      settings: { endpoint: '/api/settings', setter: setSettings },
+    };
+
+    const config = tabConfigs[activeTab];
+    if (!config) return;
+
+    setIsLoading(true);
+    loadData(activeTab, config.endpoint, (data) => {
+      config.setter(data?.data || data);
       setIsLoading(false);
-    }
-  }, [toast]);
+    });
+  }, [activeTab, isAdmin, checkingAdmin, loadData]);
 
   // Check if user is admin
   useEffect(() => {
@@ -131,24 +129,6 @@ const AdminProfile: React.FC = () => {
       checkAdmin();
     }
   }, [authUser, authLoading, navigate, toast]);
-
-  // Load initial data
-  useEffect(() => {
-    if (!isAdmin || checkingAdmin) return;
-
-    const loadAllData = async () => {
-      await Promise.all([
-        fetchData('users', '/api/accounts', setUsers),
-        fetchData('achievements', '/api/achievements', setAchievements),
-        fetchData('races', '/api/races', setRaces),
-        fetchData('news', '/api/news', setNews),
-        fetchData('standings', '/api/standings', setStandings),
-        fetchData('settings', '/api/settings', setSettings),
-      ]);
-    };
-
-    loadAllData();
-  }, [fetchData, isAdmin, checkingAdmin]);
 
   // Calculate stats when data changes
   useEffect(() => {
