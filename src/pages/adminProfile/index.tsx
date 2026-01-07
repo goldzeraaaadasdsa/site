@@ -170,7 +170,7 @@ const AdminProfile: React.FC = () => {
       case 'standings':
         // Note: standings contains championship data (from standings.json)
         // which includes drivers, race counts, and other championship info
-        return <StandingManagement standings={standings} setStandings={setStandings} isLoading={isLoading} />;
+        return <StandingManagement standings={standings as any} setStandings={setStandings as any} isLoading={isLoading} />;
       case 'settings':
         return <SettingsManagement settings={settings} setSettings={setSettings} isLoading={isLoading} />;
       case 'chats':

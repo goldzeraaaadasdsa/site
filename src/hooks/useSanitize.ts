@@ -7,11 +7,10 @@ import { useCallback } from 'react';
 import DOMPurify from 'dompurify';
 
 export const useSanitize = () => {
-  const sanitize = useCallback((dirty: string, options?: DOMPurify.Config) => {
+  const sanitize = useCallback((dirty: string) => {
     return DOMPurify.sanitize(dirty, {
       ALLOWED_TAGS: ['b', 'i', 'u', 'em', 'strong', 'p', 'br', 'a', 'ul', 'ol', 'li'],
       ALLOWED_ATTR: ['href', 'target', 'rel'],
-      ...options,
     });
   }, []);
 

@@ -15,7 +15,7 @@ import ProfileRaces from './ProfileRaces';
 import ProfileStats from './ProfileStats';
 import ProfileAchievements from './ProfileAchievements';
 import AdminProfile from '@/pages/adminProfile';
-import { User, Race, NewsItem, RaceData, Standing, Achievement, AdminStats, Account } from "@/types";
+import type { User, Race, NewsItem, Standing, Achievement } from "@/types";
 
 const Profile = () => {
   const navigate = useNavigate();
@@ -25,9 +25,10 @@ const Profile = () => {
   const { sanitizeStrict } = useSanitize();
   const { data: myRaces = [] } = useFetch<Race[]>('/api/my/races', !!authUser);
   const { data: adminNews = [] } = useFetch<NewsItem[]>('/api/news', isAdmin);
-  const { data: adminRaces = [] } = useFetch<RaceData[]>('/api/races', isAdmin);
+  const { data: adminRaces = [] } = useFetch<Race[]>('/api/races', isAdmin);
   const { data: adminStandings = [] } = useFetch<Standing[]>('/api/standings', isAdmin);
   const { data: adminAchievements = [] } = useFetch<Achievement[]>('/api/achievements', isAdmin);
+  const achievements = adminAchievements;
 
   const [user, setUser] = useState<User | null>(null);
 
@@ -142,15 +143,15 @@ const Profile = () => {
           </TabsContent>
 
           <TabsContent value="races" className="space-y-6">
-            <ProfileRaces myRaces={myRaces} />
+            <ProfileRaces myRaces={myRaces as any} />
           </TabsContent>
 
           <TabsContent value="stats" className="space-y-8">
-            <ProfileStats user={user} myRaces={myRaces} />
+            <ProfileStats user={user} myRaces={myRaces as any} />
           </TabsContent>
 
           <TabsContent value="achievements" className="space-y-6">
-            <ProfileAchievements user={user} myRaces={myRaces} achievements={achievements} />
+            <ProfileAchievements user={user} myRaces={myRaces as any} achievements={achievements} />
           </TabsContent>
 
           {isAdmin && (
