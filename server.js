@@ -79,6 +79,10 @@ const __dirname = path.dirname(__filename);
 const DIST_DIR = path.join(__dirname, 'dist');
 // ACTIVE_DIST will point to the directory we actually serve (may be DIST_DIR or a temp build dir)
 let ACTIVE_DIST = DIST_DIR;
+const IMAGES_DIR = path.join(__dirname, 'public', 'assets', 'images');
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 // Accounts file (ensure exists)
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
