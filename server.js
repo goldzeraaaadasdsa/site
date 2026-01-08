@@ -79,71 +79,6 @@ const __dirname = path.dirname(__filename);
 const DIST_DIR = path.join(__dirname, 'dist');
 // ACTIVE_DIST will point to the directory we actually serve (may be DIST_DIR or a temp build dir)
 let ACTIVE_DIST = DIST_DIR;
-const IMAGES_DIR = path.join(__dirname, 'public', 'assets', 'images');
-const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(IMAGES_DIR)) fs.mkdirSync(IMAGES_DIR, { recursive: true });
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-// Auto-build frontend if dist directory doesn't exist.
-// NOTE: In Discloud, /home/node/dist/ often has permission issues.
-// Strategy: Always attempt fallback build to /tmp (writable temp directory).
-if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html'))) {
-  console.log('🔧 Dist directory not found or incomplete. Attempting to build frontend...');
-  
-  // First, try to clean up the default dist dir if it exists and is problematic
-  try {
-    if (fs.existsSync(DIST_DIR)) {
-      console.log('   Cleaning up /dist directory...');
-      fs.rmSync(DIST_DIR, { recursive: true, force: true });
-    }
-  } catch (err) {
-    console.warn('   Could not clean /dist (may be read-only):', err.message);
-  }
-  
-  // Build to dist directory
-  console.log('🔁 Building frontend to dist directory...');
-  let buildSucceeded = false;
-  
-  try {
-    const { execSync } = await import('child_process');
-    const buildDir = DIST_DIR;
-    console.log(`   Target: ${buildDir}`);
-    
-    // Ensure buildDir exists
-    fs.mkdirSync(buildDir, { recursive: true });
-    
-    // Build with memory-efficient flags
-    const buildCmd = `npm run build -- --outDir ${buildDir}`;
-    console.log('📦 Running:', buildCmd);
-    
-    execSync(buildCmd, { 
-      stdio: 'inherit', 
-      cwd: __dirname,
-      env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=1024' },
-      timeout: 300000 // 5-minute timeout
-    });
-    
-    // Verify build
-    const builtIndex = path.join(buildDir, 'index.html');
-    if (fs.existsSync(builtIndex)) {
-      console.log('✅ Frontend build completed successfully to dist directory');
-      ACTIVE_DIST = buildDir;
-      buildSucceeded = true;
-    } else {
-      console.warn('⚠️  Build completed but index.html not found at:', builtIndex);
-    }
-  } catch (err) {
-    console.error('❌ Build failed:', err && err.message ? err.message : err);
-  }
-  
-  if (!buildSucceeded) {
-    console.error('❌❌❌ Frontend build failed. Troubleshooting:');
-    console.error('    1. Check if npm dependencies are installed: npm ci');
-    console.error('    2. Ensure 512MB+ RAM available');
-    console.error('    3. Verify /tmp directory has write permissions');
-    console.error('    Frontend will NOT be available');
-  }
-}
 
 // Accounts file (ensure exists)
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
@@ -961,11 +896,6 @@ if (fs.existsSync(ACTIVE_DIST)) {
 } else {
   console.error(`❌ FATAL: ACTIVE_DIST does not exist: ${ACTIVE_DIST}`);
 }
-
-// Catch-all handler: send back index.html for SPA routing
-app.get('*', (req, res) => {
-  res.sendFile(path.join(ACTIVE_DIST, 'index.html'));
-});
 
 // Upload endpoint (example)
 app.post('/api/upload', upload.single('file'), (req, res) => {
