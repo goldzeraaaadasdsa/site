@@ -13,39 +13,12 @@ import dotenv from 'dotenv';
 import passport from 'passport';
 import { Strategy as SteamStrategy } from 'passport-steam';
 import { WebSocketServer } from 'ws';
-import { logger, requestLogger } from './server/logger.js';
-
-// Environment validation
-const validateEnv = () => {
-  const nodeEnv = process.env.NODE_ENV || 'development';
-  const required = nodeEnv === 'production' 
-    ? ['SESSION_SECRET', 'STEAM_API_KEY']
-    : ['SESSION_SECRET'];
-  
-  const missing = required.filter(v => !process.env[v]);
-  if (missing.length > 0) {
-    logger.error(`Missing environment variables: ${missing.join(', ')}`);
-    if (nodeEnv === 'production') throw new Error('Missing required env vars');
-  }
-};
-
-// Safe error formatter
-const formatError = (error, isDev = false) => {
-  console.error('[API Error]', error);
-  return {
-    ok: false,
-    message: isDev && error?.message ? error.message : 'Internal server error',
-  };
-};
 
 // Always load .env first (for development), then override with .env.production if in production
 dotenv.config(); // Load .env
 if (process.env.NODE_ENV === 'production') {
   dotenv.config({ path: '.env.production', override: true }); // Override with .env.production
 }
-
-// Validate environment at startup
-validateEnv();
 
 // Detect environment - use process.env which has priority
 const isProduction = process.env.NODE_ENV === 'production';
@@ -127,20 +100,20 @@ if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html')
     console.warn('   Could not clean /dist (may be read-only):', err.message);
   }
   
-  // Always use fallback build to /tmp (avoids permission issues)
-  console.log('🔁 Building frontend to temporary directory (more reliable on Discloud)...');
+  // Build to dist directory
+  console.log('🔁 Building frontend to dist directory...');
   let buildSucceeded = false;
   
   try {
     const { execSync } = await import('child_process');
-    const tmpDir = path.join(os.tmpdir(), `bsr_dist_${Date.now()}`);
-    console.log(`   Target: ${tmpDir}`);
+    const buildDir = DIST_DIR;
+    console.log(`   Target: ${buildDir}`);
     
-    // Ensure tmpDir exists
-    fs.mkdirSync(tmpDir, { recursive: true });
+    // Ensure buildDir exists
+    fs.mkdirSync(buildDir, { recursive: true });
     
-    // Build with memory-efficient flags and explicit cleanup
-    const buildCmd = `npm run build -- --outDir ${tmpDir} --emptyOutDir`;
+    // Build with memory-efficient flags
+    const buildCmd = `npm run build -- --outDir ${buildDir}`;
     console.log('📦 Running:', buildCmd);
     
     execSync(buildCmd, { 
@@ -151,10 +124,10 @@ if (!fs.existsSync(DIST_DIR) || !fs.existsSync(path.join(DIST_DIR, 'index.html')
     });
     
     // Verify build
-    const builtIndex = path.join(tmpDir, 'index.html');
+    const builtIndex = path.join(buildDir, 'index.html');
     if (fs.existsSync(builtIndex)) {
-      console.log('✅ Frontend build completed successfully to temporary directory');
-      ACTIVE_DIST = tmpDir;
+      console.log('✅ Frontend build completed successfully to dist directory');
+      ACTIVE_DIST = buildDir;
       buildSucceeded = true;
     } else {
       console.warn('⚠️  Build completed but index.html not found at:', builtIndex);
@@ -186,7 +159,6 @@ function writeAccounts(arr){
 const PORT = process.env.PORT || 8080;
 
 // Basic middleware
-app.use(requestLogger); // Add logging middleware
 // Configure Helmet with a Content Security Policy that allows Steam avatar images
 app.use(helmet({
   contentSecurityPolicy: {
@@ -224,16 +196,6 @@ if (trustProxy) console.log('Trust proxy is enabled');
 // Configure rate limiter. Use IP from request to avoid validation errors
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 200, keyGenerator: (req) => req.ip });
 app.use(limiter);
-
-// Stricter rate limiter for Steam authentication to prevent brute force and too many requests
-const steamLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, // 5 minute window
-  max: 5, // Max 5 login attempts per 5 minutes
-  keyGenerator: (req) => req.ip,
-  message: 'Muitas tentativas de login. Tente novamente em 5 minutos.',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 // Sessions (required for passport-steam)
 // TEMPORARY: Disabled secure/sameSite for testing. Will re-enable after debugging.
@@ -479,81 +441,8 @@ app.get('/api/my/races', requireAuth, (req,res)=>{
   res.json(mine);
 });
 
-// News endpoints with pagination and filtering
-app.get('/api/news', (req,res)=>{ 
-  try {
-    const allNews = readNews();
-    
-    // Pagination parameters
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const search = (req.query.search || '').toLowerCase();
-    const category = req.query.category;
-    const published = req.query.published;
-    const sort = req.query.sort || 'date';
-    const order = req.query.order === 'asc' ? 1 : -1;
-    
-    // Filter by search (title, summary, content)
-    let filtered = allNews;
-    if (search) {
-      filtered = filtered.filter(item => 
-        item.title?.toLowerCase().includes(search) ||
-        item.summary?.toLowerCase().includes(search) ||
-        item.content?.toLowerCase().includes(search)
-      );
-    }
-    
-    // Filter by category
-    if (category) {
-      filtered = filtered.filter(item => item.category === category);
-    }
-    
-    // Filter by published status
-    if (published !== undefined) {
-      const isPub = published === 'true' || published === '1';
-      filtered = filtered.filter(item => !!item.published === isPub);
-    }
-    
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal = a[sort];
-      let bVal = b[sort];
-      
-      if (sort === 'date') {
-        aVal = new Date(a.date || 0).getTime();
-        bVal = new Date(b.date || 0).getTime();
-      } else if (sort === 'views') {
-        aVal = a.views || 0;
-        bVal = b.views || 0;
-      }
-      
-      if (aVal < bVal) return -1 * order;
-      if (aVal > bVal) return 1 * order;
-      return 0;
-    });
-    
-    // Paginate
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const data = filtered.slice(start, start + limit);
-    
-    res.json({
-      ok: true,
-      data,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1
-      }
-    });
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
-});
-
+// News endpoints
+app.get('/api/news', (req,res)=>{ res.json(readNews()); });
 app.post('/api/news', requireAdmin, (req,res)=>{
   const data = readNews();
   const item = req.body;
@@ -741,100 +630,14 @@ app.get('/api/admin/chats/:id/export', requireAdmin, (req, res) => {
   res.send(payload);
 });
 
-// Admin: delete chat
-app.delete('/api/admin/chats/:id', requireAdmin, (req, res) => {
-  const id = req.params.id;
-  const chats = readChats();
-  const idx = chats.findIndex(c => c.id === id);
-  if (idx === -1) return res.status(404).json({ ok: false });
-  const removed = chats.splice(idx, 1)[0];
-  writeChats(chats);
-  res.json({ ok: true, removed });
-});
-
-// Admin: unassign chat
-app.post('/api/admin/chats/:id/unassign', requireAdmin, (req, res) => {
-  const id = req.params.id;
-  const chats = readChats();
-  const chat = chats.find(c => c.id === id);
-  if (!chat) return res.status(404).json({ ok: false });
-  chat.assignedAdmin = undefined;
-  writeChats(chats);
-  broadcastToChat(id, { type: 'unassigned', chatId: id });
-  res.json({ ok: true });
-});
-
-// Races endpoints with pagination
+// Races endpoints (with type/carClass)
 app.get('/api/races', (req,res)=>{
-  try {
-    const allRaces = readRaces();
-    
-    // Pagination parameters
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const search = (req.query.search || '').toLowerCase();
-    const status = req.query.status;
-    const sort = req.query.sort || 'date';
-    const order = req.query.order === 'asc' ? 1 : -1;
-    
-    // Update pilots count
-    allRaces.forEach(race => {
-      race.pilots = race.participants?.length || 0;
-    });
-    
-    // Filter by search (title, track, championship)
-    let filtered = allRaces;
-    if (search) {
-      filtered = filtered.filter(r => 
-        r.title?.toLowerCase().includes(search) ||
-        r.track?.toLowerCase().includes(search) ||
-        r.championship?.toLowerCase().includes(search)
-      );
-    }
-    
-    // Filter by status if provided
-    if (status) {
-      filtered = filtered.filter(r => r.status === status);
-    }
-    
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal = a[sort];
-      let bVal = b[sort];
-      
-      if (sort === 'date') {
-        aVal = new Date(a.date || 0).getTime();
-        bVal = new Date(b.date || 0).getTime();
-      } else if (sort === 'pilots') {
-        aVal = a.pilots || 0;
-        bVal = b.pilots || 0;
-      }
-      
-      if (aVal < bVal) return -1 * order;
-      if (aVal > bVal) return 1 * order;
-      return 0;
-    });
-    
-    // Paginate
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const data = filtered.slice(start, start + limit);
-    
-    res.json({
-      ok: true,
-      data,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1
-      }
-    });
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
+  const races = readRaces();
+  // Update pilots count based on participants
+  races.forEach(race => {
+    race.pilots = race.participants?.length || 0;
+  });
+  res.json(races);
 });
 app.post('/api/races', requireAdmin, (req,res)=>{
   const data = readRaces();
@@ -919,160 +722,30 @@ app.get('/api/races/:id/enriched', (req,res)=>{
   res.json(enrichedRace);
 });
 
-// Standings endpoints with pagination and filtering
-app.get('/api/standings', (req,res)=>{ 
-  try {
-    const allStandings = readStandings();
-    
-    // Pagination parameters
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const search = (req.query.search || '').toLowerCase();
-    const category = req.query.category;
-    const sort = req.query.sort || 'points';
-    const order = req.query.order === 'asc' ? 1 : -1;
-    
-    // Filter by search (category, driver/pilot name)
-    let filtered = allStandings;
-    if (search) {
-      filtered = filtered.filter(item => 
-        item.category?.toLowerCase().includes(search) ||
-        item.driverName?.toLowerCase().includes(search) ||
-        item.name?.toLowerCase().includes(search)
-      );
-    }
-    
-    // Filter by category
-    if (category) {
-      filtered = filtered.filter(item => item.category === category);
-    }
-    
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal = a[sort] ?? 0;
-      let bVal = b[sort] ?? 0;
-      
-      if (typeof aVal === 'string') {
-        return aVal.localeCompare(bVal) * order;
-      }
-      return (aVal < bVal ? -1 : aVal > bVal ? 1 : 0) * order;
-    });
-    
-    // Paginate
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const data = filtered.slice(start, start + limit);
-    
-    res.json({
-      ok: true,
-      data,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1
-      }
-    });
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
-});
+// Standings endpoints
+app.get('/api/standings', (req,res)=>{ res.json(readStandings()); });
 app.post('/api/standings', requireAdmin, (req,res)=>{ const data = readStandings(); const obj = req.body; data.push(obj); writeStandings(data); res.json({ok:true, category: obj}); });
 app.put('/api/standings/:category', requireAdmin, (req,res)=>{ const category = req.params.category; const data = readStandings(); const idx = data.findIndex(s=>s.category && s.category.toLowerCase()===category.toLowerCase()); if(idx===-1) return res.status(404).json({ok:false}); data[idx]=Object.assign({}, data[idx], req.body); writeStandings(data); res.json({ok:true, category: data[idx]}); });
 app.delete('/api/standings/:category', requireAdmin, (req,res)=>{ const category = req.params.category; const data = readStandings(); const idx = data.findIndex(s=>s.category && s.category.toLowerCase()===category.toLowerCase()); if(idx===-1) return res.status(404).json({ok:false}); const removed = data.splice(idx,1)[0]; writeStandings(data); res.json({ok:true, removed}); });
 
-// Achievements endpoints with pagination and filtering
-app.get('/api/achievements', (req,res)=>{ 
-  try {
-    const allAchievements = readAchievements();
-    
-    // Pagination parameters
-    const page = Math.max(1, parseInt(req.query.page) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-    const search = (req.query.search || '').toLowerCase();
-    const category = req.query.category;
-    const minPoints = parseInt(req.query.minPoints) || 0;
-    const sort = req.query.sort || 'points';
-    const order = req.query.order === 'asc' ? 1 : -1;
-    
-    // Filter by search (name, description)
-    let filtered = allAchievements;
-    if (search) {
-      filtered = filtered.filter(item => 
-        item.name?.toLowerCase().includes(search) ||
-        item.description?.toLowerCase().includes(search)
-      );
-    }
-    
-    // Filter by category
-    if (category) {
-      filtered = filtered.filter(item => item.category === category);
-    }
-    
-    // Filter by minimum points
-    if (minPoints > 0) {
-      filtered = filtered.filter(item => (item.points || 0) >= minPoints);
-    }
-    
-    // Sort
-    filtered.sort((a, b) => {
-      let aVal = a[sort] ?? 0;
-      let bVal = b[sort] ?? 0;
-      
-      if (typeof aVal === 'string') {
-        return aVal.localeCompare(bVal) * order;
-      }
-      return (aVal < bVal ? -1 : aVal > bVal ? 1 : 0) * order;
-    });
-    
-    // Paginate
-    const total = filtered.length;
-    const start = (page - 1) * limit;
-    const data = filtered.slice(start, start + limit);
-    
-    res.json({
-      ok: true,
-      data,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1
-      }
-    });
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
-});
+// Achievements endpoints
+app.get('/api/achievements', (req,res)=>{ res.json(readAchievements()); });
 app.post('/api/achievements', requireAdmin, (req,res)=>{ const data = readAchievements(); const item = req.body; item.id = (data.reduce((m,it)=>Math.max(m, it.id||0),0) || 0) + 1; data.unshift(item); writeAchievements(data); res.json({ok:true, item}); });
 app.put('/api/achievements/:id', requireAdmin, (req,res)=>{ const id = Number(req.params.id); const data = readAchievements(); const idx = data.findIndex(x=>x.id===id); if(idx===-1) return res.status(404).json({ok:false}); data[idx]=Object.assign({}, data[idx], req.body); writeAchievements(data); res.json({ok:true, item:data[idx]}); });
 app.delete('/api/achievements/:id', requireAdmin, (req,res)=>{ const id = Number(req.params.id); const data = readAchievements(); const idx = data.findIndex(x=>x.id===id); if(idx===-1) return res.status(404).json({ok:false}); const removed = data.splice(idx,1)[0]; writeAchievements(data); res.json({ok:true, removed}); });
 
 // Settings endpoints
-app.get('/api/settings', (req,res)=>{ 
-  try {
-    res.json(readSettings()); 
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
-});
-
-// Settings update requires admin
-app.put('/api/settings', requireAdmin, (req,res)=>{
-  try {
-    const existingSettings = readSettings();
-    const newData = req.body;
-    const mergedSettings = { ...existingSettings, ...newData };
-    mergedSettings.updatedAt = new Date().toISOString();
-    writeSettings(mergedSettings);
-    res.json({ok:true, settings: mergedSettings});
-  } catch (err) {
-    res.status(500).json(formatError(err, process.env.NODE_ENV !== 'production'));
-  }
+app.get('/api/settings', (req,res)=>{ res.json(readSettings()); });
+app.put('/api/settings', (req,res)=>{
+  // TODO: Re-enable admin check in production
+  // requireAdmin(req, res, () => {}
+  const existingSettings = readSettings();
+  const newData = req.body;
+  const mergedSettings = { ...existingSettings, ...newData };
+  mergedSettings.updatedAt = new Date().toISOString();
+  writeSettings(mergedSettings);
+  res.json({ok:true, settings: mergedSettings});
+  // });
 });
 
 // My account
@@ -1185,10 +858,10 @@ app.use('/auth', (req, res, next) => {
 });
 
 // Steam Login Initiator
-app.get('/auth/steam', steamLimiter, passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL }));
+app.get('/auth/steam', passport.authenticate('steam', { failureRedirect: process.env.FRONTEND_URL }));
 
 // Steam Callback Handler
-app.get('/auth/steam/return', steamLimiter, passport.authenticate('steam', { 
+app.get('/auth/steam/return', passport.authenticate('steam', { 
   failureRedirect: process.env.FRONTEND_URL,
   failureMessage: true 
 }), async (req, res, next) => {
@@ -1288,6 +961,11 @@ if (fs.existsSync(ACTIVE_DIST)) {
 } else {
   console.error(`❌ FATAL: ACTIVE_DIST does not exist: ${ACTIVE_DIST}`);
 }
+
+// Catch-all handler: send back index.html for SPA routing
+app.get('*', (req, res) => {
+  res.sendFile(path.join(ACTIVE_DIST, 'index.html'));
+});
 
 // Upload endpoint (example)
 app.post('/api/upload', upload.single('file'), (req, res) => {
@@ -1394,8 +1072,7 @@ app.get('/health', (req, res) => {
 // 404/SPA Fallback handler - catches all routes not matched above
 app.use((req, res) => {
   // Never serve HTML for API routes - always return JSON
-  // Allow auth routes to be processed by their specific handlers
-  if (req.path.startsWith('/api/')) {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
     return res.status(404).json({ error: 'Not found' });
   }
 
@@ -1489,7 +1166,7 @@ wss.on('connection', (ws, req) => {
           broadcastToChat(chatId, { type: 'presence', chatId, adminCount: adminCount2 });
         }catch(e){}
       }
-      // typing notifications
+     // typing notifications
       if (data && data.type === 'typing' && data.chatId) {
         const chatId = data.chatId;
         const role = data.role || wsRoles.get(ws) || 'user';
